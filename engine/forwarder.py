@@ -336,4 +336,34 @@ async def run_engine():
                 else:
                     today_total, _, _ = get_today_forwarded()
                     if today_total >= daily_limit:
-                        db_sources.update_source(group_id,
+                        db_sources.update_source(group_id, status="pending")
+                        await notify(f"📊 Daily limit reached. <b>{group_name}</b> paused. Will resume tomorrow.")
+                        _engine_running = False
+                    else:
+                        db_sources.update_source(group_id, status="failed", fail_reason="Batch processing failed")
+                break
+            
+            current_pos = batch_end + 1
+            db_sources.update_source(group_id, current_msg_id=current_pos)
+            
+            await notify(f"✅ Batch {batch_num} complete! Forwarded {forwarded} media")
+            await apply_cooldown("batch")
+            
+            batch_num += 1
+        
+        if not _skip_current and current_pos > total_msgs:
+            db_sources.update_source(group_id, status="completed", completed_at=datetime.utcnow().isoformat())
+            sg_fresh = db_sources.get_source(group_id)
+            await notify(
+                f"✅ <b>COMPLETED:</b> {group_name}\n"
+                f"Total forwarded: {sg_fresh['total_forwarded']} media\n"
+                f"🎬 Videos: {sg_fresh['total_videos']} | 🖼️ Photos: {sg_fresh['total_photos']}"
+            )
+        
+        _current_source_id = None
+        
+        if not _engine_running:
+            break
+        await asyncio.sleep(2)
+    
+    logger.info("Engine loop exited.")
